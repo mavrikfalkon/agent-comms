@@ -2,6 +2,10 @@
 
 Recorded 2026-09-11 from CommsRelay discussion. Not a license to implement everything at once.
 
+## Claude Code rewake (2026-09-11)
+
+Claude Code MCP is `Start-AgentCommsClaudeCode.cmd` → `bridge claude-code`, not generic `bridge mcp`. Hooks in `.claude/settings.json` run `hooks/drain.ps1` (Windows; `drain.sh` is Unix). Pending file: `~/.agents/bus/pending/claude-code--<cwd-slug>.jsonl`. Fully quit Claude Code after this switch; register as `claude-coworker` again (new harness slot `claude-code`).
+
 ## Do next (Butch: Claude goes through code first)
 
 1. **Extra Dashboard peer per MCP**  

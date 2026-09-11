@@ -37,6 +37,7 @@ import {
   type IdentitySlot,
 } from "../../core/identity-store.js";
 import { tryStartWebServer } from "../user/web/server.js";
+import { ChatController } from "../user/controller.js";
 import { nanoid } from "../../core/nanoid.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -270,9 +271,6 @@ export async function run(): Promise<void> {
   // -----------------------------------------------------------------------
 
   await store.init();
-  await tryStartWebServer();
-  await mcp.connect(new StdioServerTransport());
-
   const reg = await ensureRegistered({
     cwd: process.cwd(),
     store,
@@ -280,6 +278,15 @@ export async function run(): Promise<void> {
     defaultName: `claude-code-${nanoid(4)}`,
   });
   agentId = reg.agentId;
+  await tryStartWebServer(
+    ChatController.fromExisting(store, {
+      agentId,
+      harness: "claude-code",
+      cwd: process.cwd(),
+      pid: process.pid,
+    }),
+  );
+  await mcp.connect(new StdioServerTransport());
 
   // -----------------------------------------------------------------------
   // Shutdown — clean up mesh state when Claude Code exits
