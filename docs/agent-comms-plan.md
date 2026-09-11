@@ -21,7 +21,7 @@ A one-off `npx` in one harness is not enough: we want the source here (our fork)
 | Canonical MCP | `C:\Users\mavri\Projects\CommsRelay\Start-AgentCommsMcp.cmd` — cds here, then `node dist\cli.js bridge mcp`. Every harness uses this. Never `npx -y agent-comms`. |
 | Claude Code | Local MCP in `~/.claude.json` for this folder: `cmd.exe /c Start-AgentCommsMcp.cmd` |
 | Claude Cowork / Desktop | Same launcher in Store `claude_desktop_config.json` |
-| Cursor / Grok Bots | User MCP `C:\Users\mavri\.cursor\mcp.json` — same launcher |
+| Cursor / Grok Bots | User MCP `C:\Users\mavri\.cursor\mcp.json` **and** GrokOnPC project `C:\Users\mavri\Projects\GrokOnPC\.cursor\mcp.json` — same launcher. Bots live in the GrokOnPC Cursor window, not a second PC. |
 | This Grok TUI | Has MCP; **stays off the mesh for now** |
 | pnpm | Via Corepack (`corepack pnpm`, shims in `%LOCALAPPDATA%\Programs\corepack-shims`). Do not `corepack enable` into `C:\Program Files\nodejs` (EPERM). |
 | Sibling `Relay` | `C:\Users\mavri\Projects\Relay` — different product. Do not mix |
