@@ -25,6 +25,7 @@ import {
   type IdentitySlot,
 } from "../../core/identity-store.js";
 import { tryStartWebServer } from "../user/web/server.js";
+import { ChatController } from "../user/controller.js";
 import { nanoid } from "../../core/nanoid.js";
 import {
   createMcpTrace,
@@ -166,7 +167,27 @@ async function runBridge(trace: McpTrace): Promise<void> {
 
   await store.init();
   trace("mesh_ready");
-  await tryStartWebServer();
+
+  // Register before starting the web UI so it can share this agent's mesh
+  // identity via ChatController.fromExisting — otherwise createWebServer
+  // falls back to minting its own "Dashboard" peer.
+  const reg = await ensureRegistered({
+    cwd: process.cwd(),
+    store,
+    harness: "mcp",
+    defaultName: `mcp-${nanoid(4)}`,
+  });
+  agentId = reg.agentId;
+
+  await tryStartWebServer(
+    ChatController.fromExisting(store, {
+      agentId,
+      harness: "mcp",
+      cwd: process.cwd(),
+      pid: process.pid,
+    }),
+  );
+
   const previousClose = mcp.server.onclose;
   const previousError = mcp.server.onerror;
   mcp.server.onclose = () => {
@@ -179,12 +200,4 @@ async function runBridge(trace: McpTrace): Promise<void> {
   };
   await mcp.connect(new StdioServerTransport());
   trace("mcp_connected");
-
-  const reg = await ensureRegistered({
-    cwd: process.cwd(),
-    store,
-    harness: "mcp",
-    defaultName: `mcp-${nanoid(4)}`,
-  });
-  agentId = reg.agentId;
 }
