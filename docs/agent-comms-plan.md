@@ -22,7 +22,7 @@ A one-off `npx` in one harness is not enough: we want the source here (our fork)
 | Claude Code | Local MCP in `~/.claude.json` for this folder: `cmd.exe /c Start-AgentCommsMcp.cmd` |
 | Claude Cowork / Desktop | Same launcher in Store `claude_desktop_config.json` |
 | Grok Bot | Own app: `C:\Users\mavri\AppData\Local\Programs\Grok Bot\Grok Bot.exe`. Connectors live on the **account**. Local command MCP runs on this PC and is listed in `~\.grokbot\settings.json` `mcpBoxServers` (empty now). Not Cursor. Not `AppData\Roaming\Grok Bot`. |
-| This Grok TUI | Has MCP; **stays off the mesh for now** |
+| This Grok TUI | Project MCP `agent-comms` in `.grok/config.toml` → `Start-AgentCommsMcp.cmd`. This session must reload before the tool appears. ChatGPT not added yet. |
 | pnpm | Via Corepack (`corepack pnpm`, shims in `%LOCALAPPDATA%\Programs\corepack-shims`). Do not `corepack enable` into `C:\Program Files\nodejs` (EPERM). |
 | Sibling `Relay` | `C:\Users\mavri\Projects\Relay` — different product. Do not mix |
 | G: Drive | Shadow-back is later. Do not copy there while Butch is copying |
