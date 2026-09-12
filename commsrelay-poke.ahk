@@ -1,9 +1,11 @@
 #Requires AutoHotkey v2.0
+#SingleInstance Force
 SetTitleMatchMode 2
 #Include "C:\Users\mavri\Projects\GrokOnPC\AHKScripts\upstream\UIA-v2\Lib\UIA.ahk"
 
-; Lives in this project. Included from GrokOnPC\AHKScripts\Main.ahk — do not #SingleInstance
-; or ExitApp here (that would kill Main). Do not copy into C:\Users\mavri\AHK\.
+; Lives in this project. Included from GrokOnPC Main.ahk (Main already has Force).
+; Force here is for CLI: replace a stuck poke.ahk without the Prompt dialog.
+; Do not copy into C:\Users\mavri\AHK\. Do not ExitApp except on the CLI path.
 ; Leader poke — drain agent_comms. No screen-absolute clicks. Match process + title.
 ; Electron: click the BOTTOM-MOST Edit/Document in that window (the composer).
 ; Do not match by accessible name — Claude Code already renamed Prompt / placeholder.
