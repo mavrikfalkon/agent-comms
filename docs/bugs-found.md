@@ -37,4 +37,4 @@ Claude Code MCP is `Start-AgentCommsClaudeCode.cmd` → `bridge claude-code`, no
 
 ## AHK poke (this repo `commsrelay-poke.ahk`)
 
-11. Screen-absolute clicks locked the PC — **removed**. Client-relative / SendText only. Terminal must not Ctrl+A.
+11. Grok TUI **Windows MCP `ui_find` / UI tree search** (especially against ChatGPT) timed out (`0x800705B4`) and locked the desktop. That was **not** the AHK poke. Do not `ui_find`/`ui_snapshot` ChatGPT from this TUI. AHK poke is fine; screen-absolute clicks were still removed as fragile. Terminal must not Ctrl+A.
