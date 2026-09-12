@@ -62,7 +62,13 @@ void test("loadOrCreateIdentity persists and reloads the same key material", () 
   assert.equal(fs.existsSync(lockFile), false);
 });
 
-void test("identity file is created with owner-only permissions", () => {
+void test("identity file is created with owner-only permissions", (t) => {
+  if (process.platform === "win32") {
+    t.skip(
+      "POSIX mode bits do not verify Windows permissions; NTFS ACLs are not tested here",
+    );
+    return;
+  }
   const { slot, dir } = tempSlot("claude-code");
   loadOrCreateIdentity(slot);
   const mode = fs.statSync(slotFile(dir, ".json")).mode & 0o777;
