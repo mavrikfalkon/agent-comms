@@ -286,7 +286,6 @@ export async function run(): Promise<void> {
       pid: process.pid,
     }),
   );
-  await mcp.connect(new StdioServerTransport());
 
   // -----------------------------------------------------------------------
   // Shutdown — clean up mesh state when Claude Code exits
@@ -305,10 +304,25 @@ export async function run(): Promise<void> {
     }
   }
 
+  // Guard against double-firing: stdin "end" and "close" both fire on a
+  // normal EOF, and a signal can race either of them during the same exit.
+  let shuttingDown = false;
+  function triggerShutdown(): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void shutdown().finally(() => process.exit(0));
+  }
+
+  // StdioServerTransport only listens for stdin "data"/"error" — it never
+  // treats stdin ending as a close, so mcp.server.onclose never fires just
+  // because the host went away. Without a direct stdin listener, the mesh
+  // and web-server sockets keep the event loop alive and this process
+  // survives as a stranded, still-"active" peer (the stdin-EOF leak).
+  process.stdin.once("end", triggerShutdown);
+  process.stdin.once("close", triggerShutdown);
+
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-    process.on(signal, () => {
-      void shutdown().finally(() => process.exit(0));
-    });
+    process.on(signal, triggerShutdown);
   }
 
   process.on("exit", () => {
@@ -318,4 +332,6 @@ export async function run(): Promise<void> {
     // Lock release is synchronous and pid-guarded, so it is safe to repeat.
     releaseIdentityLock(identitySlot);
   });
+
+  await mcp.connect(new StdioServerTransport());
 }
