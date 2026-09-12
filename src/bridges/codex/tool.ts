@@ -35,8 +35,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function run(): Promise<void> {
   // Persistent identity for this slot: a stable fingerprint means the agent
-  // ID survives restarts, so peers can keep targeting us. The stdio server
-  // has no graceful shutdown hook; a stale lock self-heals via the pid probe.
+  // ID survives restarts, so peers can keep targeting us. Shutdown releases
+  // the slot lock; after a crash, a stale lock self-heals via the pid probe.
   const identitySlot: IdentitySlot = { harness: "codex", cwd: process.cwd() };
   const identity = loadOrCreateIdentity(identitySlot);
   const store = new MeshStore();
@@ -150,16 +150,27 @@ export async function run(): Promise<void> {
     }
   }
 
+  // EOF, stream close, and signals can race: run mesh cleanup only once.
+  let shuttingDown = false;
+  function triggerShutdown(): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void shutdown().finally(() => process.exit(0));
+  }
+
+  // The SDK does not call onclose when stdin ends. Listen directly so
+  // open mesh/web sockets cannot strand the bridge after its host exits.
+  process.stdin.once("end", triggerShutdown);
+  process.stdin.once("close", triggerShutdown);
+
   const previousClose = mcp.server.onclose;
   mcp.server.onclose = () => {
     previousClose?.();
-    void shutdown().finally(() => process.exit(0));
+    triggerShutdown();
   };
 
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-    process.on(signal, () => {
-      void shutdown().finally(() => process.exit(0));
-    });
+    process.on(signal, triggerShutdown);
   }
 
   process.on("exit", () => {
