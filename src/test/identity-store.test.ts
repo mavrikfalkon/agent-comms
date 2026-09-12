@@ -6,7 +6,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
   loadOrCreateIdentity,
@@ -169,9 +169,20 @@ void test("different AGENT_COMMS_INSTANCE values get independent identities with
   );
 });
 
-void test("an unset instance does not collide with a named instance in the same slot", () => {
+void test("an empty instance does not collide with a named instance in the same slot", () => {
   const dir = fs.mkdtempSync(path.join(tmpdir(), "agent-comms-identity-test-"));
-  const bare: IdentitySlot = { harness: "mcp", cwd: "/tmp/project", dir };
+  // Explicit "" rather than omitting `instance`: omitting it falls back to
+  // process.env.AGENT_COMMS_INSTANCE, so in an environment that already has
+  // that var set (e.g. a Codex or grok-tui shell), an omitted instance would
+  // silently inherit it and this test would wrongly compare a slot against
+  // itself. Pin the "no instance" side to "" so the test means what it says
+  // regardless of the ambient environment.
+  const bare: IdentitySlot = {
+    harness: "mcp",
+    cwd: "/tmp/project",
+    dir,
+    instance: "",
+  };
   const named: IdentitySlot = {
     harness: "mcp",
     cwd: "/tmp/project",
@@ -185,6 +196,47 @@ void test("an unset instance does not collide with a named instance in the same 
 
   releaseIdentityLock(bare);
   releaseIdentityLock(named);
+});
+
+void test("an omitted instance falls back to the AGENT_COMMS_INSTANCE env var", () => {
+  // The other instance tests only ever pass slot.instance explicitly, so
+  // none of them actually exercise the env-var fallback in resolveInstance —
+  // this drives it through a real child process with a controlled env,
+  // since mutating process.env in-process would leak into every other test
+  // sharing this run (node:test runs this file's tests sequentially, but
+  // future tests or --test-concurrency changes shouldn't have to know that).
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "agent-comms-identity-test-"));
+  // A file:// URL, not a raw path: Windows rejects a bare "C:\..." specifier
+  // for a dynamic ESM import ("Only URLs with a scheme in: file, data, and
+  // node are supported").
+  const moduleUrl = new URL("../core/identity-store.js", import.meta.url).href;
+
+  function fingerprintWithEnv(env: NodeJS.ProcessEnv): string {
+    const script = [
+      `import { loadOrCreateIdentity } from ${JSON.stringify(moduleUrl)};`,
+      `const identity = loadOrCreateIdentity({ harness: "mcp", cwd: "/tmp/project", dir: ${JSON.stringify(dir)} });`,
+      `process.stdout.write(identity.fingerprint);`,
+    ].join("\n");
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      { env, encoding: "utf-8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  }
+
+  const envWithInstance = {
+    ...process.env,
+    AGENT_COMMS_INSTANCE: "env-test-instance",
+  };
+  const envWithoutInstance = { ...process.env };
+  delete envWithoutInstance.AGENT_COMMS_INSTANCE;
+
+  const withInstance = fingerprintWithEnv(envWithInstance);
+  const withoutInstance = fingerprintWithEnv(envWithoutInstance);
+
+  assert.notEqual(withInstance, withoutInstance);
 });
 
 void test("a second process with the same instance is still forced ephemeral", () => {
