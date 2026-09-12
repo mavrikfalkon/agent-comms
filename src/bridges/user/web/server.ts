@@ -149,10 +149,23 @@ export async function createWebServer(
 
   server.on("upgrade", (req, socket, head) => {
     if (req.url === "/ws/mesh") {
+      // Deliberately cross-origin: the standalone PWA (mesh-client.ts,
+      // e.g. served from GitHub Pages) discovers and connects to this
+      // endpoint from a different origin by design. No origin check here —
+      // closing this without breaking that feature needs real
+      // authentication, not an origin allowlist.
       meshWss.handleUpgrade(req, socket, head, (ws) => {
         meshWss.emit("connection", ws, req);
       });
     } else {
+      // The dashboard's own chat WS is only ever opened by this same
+      // server's page — reject any browser-supplied Origin that isn't us.
+      // A request with no Origin header (non-browser clients) is allowed
+      // through, since only browsers enforce same-origin policy anyway.
+      if (!isSameOriginUpgrade(req, server)) {
+        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });
@@ -233,12 +246,15 @@ function handleRequest(
 ): void {
   const url = new URL(req.url ?? "/", `http://localhost`);
 
-  // No CORS headers: this API is same-origin only. The one legitimate
-  // cross-origin case (a PWA hosted elsewhere, e.g. GitHub Pages) never
-  // calls this REST API — it only probes with a no-cors fetch and talks
-  // over /ws/mesh — so a wildcard Access-Control-Allow-Origin here just
-  // let any website the user had open silently act as them. Full
-  // authentication (needed for real remote/phone access) is separate,
+  // No CORS headers, and /api/action below requires Content-Type:
+  // application/json. Dropping CORS alone doesn't stop a cross-origin page
+  // from POSTing here — a CORS-"simple" Content-Type (e.g. text/plain)
+  // carrying a JSON body skips the preflight CORS would have blocked, so
+  // the browser sends it anyway; only the server-side Content-Type check
+  // actually rejects it. This still does not authenticate same-origin
+  // requests, and /ws/mesh (below) is deliberately open to other origins
+  // for the standalone-PWA case — full authentication (needed for real
+  // remote/phone access, and to close /ws/mesh properly) is separate,
   // planned follow-up work.
 
   // Frontend HTML
@@ -345,6 +361,19 @@ function handleRequest(
   }
 
   if (url.pathname === "/api/action" && req.method === "POST") {
+    // Reject anything but application/json. A cross-origin page can send a
+    // CORS-"simple" request (e.g. Content-Type: text/plain) with a JSON
+    // body to dodge the preflight that dropping CORS headers relies on —
+    // this check closes that regardless of what the browser would have
+    // preflighted, since the check runs before the body is even read.
+    const contentType = (req.headers["content-type"] ?? "")
+      .split(";")[0]
+      ?.trim()
+      .toLowerCase();
+    if (contentType !== "application/json") {
+      jsonError(res, "Content-Type must be application/json", 415);
+      return;
+    }
     void (async () => {
       const body = await readBody(req);
       const parsed: unknown = JSON.parse(body);
@@ -698,6 +727,23 @@ function parsePushSubscription(value: unknown): PushSubscription | undefined {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * True unless the request carries a browser-set Origin header that doesn't
+ * match this server's own address. No Origin header at all (non-browser
+ * clients, or same-process tooling) is allowed through.
+ */
+function isSameOriginUpgrade(
+  req: http.IncomingMessage,
+  server: http.Server,
+): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : undefined;
+  if (port === undefined) return false;
+  return origin === `http://${WEB_HOST}:${String(port)}`;
+}
 
 function json(res: http.ServerResponse, data: unknown): void {
   res.writeHead(200, { "Content-Type": "application/json" });

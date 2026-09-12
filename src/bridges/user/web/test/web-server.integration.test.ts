@@ -73,6 +73,7 @@ function fetchJson(
 function postAction(
   port: number,
   action: Record<string, string>,
+  contentType = "application/json",
 ): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(action);
@@ -83,7 +84,7 @@ function postAction(
         path: "/api/action",
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": contentType,
           "Content-Length": String(body.length),
         },
       },
@@ -106,6 +107,32 @@ function postAction(
     req.on("error", reject);
     req.write(body);
     req.end();
+  });
+}
+
+function openWs(
+  port: number,
+  path: string,
+  origin?: string,
+): Promise<{ ok: boolean; code?: number }> {
+  return new Promise((resolve) => {
+    const ws = new WS(`ws://127.0.0.1:${String(port)}${path}`, {
+      headers: origin ? { Origin: origin } : {},
+    });
+    ws.on("open", () => {
+      ws.close();
+      resolve({ ok: true });
+    });
+    ws.on("unexpected-response", (_req, res) => {
+      resolve(
+        res.statusCode === undefined
+          ? { ok: false }
+          : { ok: false, code: res.statusCode },
+      );
+    });
+    ws.on("error", () => {
+      resolve({ ok: false });
+    });
   });
 }
 
@@ -208,6 +235,86 @@ describe("Web server integration", () => {
     try {
       const { status } = await fetchJson(port, "/nonexistent");
       assert.strictEqual(status, 404);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("rejects a disguised cross-origin POST /api/action and never executes it", async () => {
+    const { port, cleanup } = await setup();
+    try {
+      // A cross-origin page can't set Content-Type: application/json without
+      // triggering a CORS preflight (which fails once permissive CORS
+      // headers are gone) — but a CORS-"simple" type like text/plain skips
+      // the preflight entirely, so the browser sends this whether or not
+      // CORS allows it. The server must reject on Content-Type alone.
+      const { status } = await postAction(
+        port,
+        { action: "create_room", name: "should-not-exist", type: "public" },
+        "text/plain",
+      );
+      assert.strictEqual(status, 415);
+      const { body: rooms } = await fetchJson(port, "/api/rooms");
+      assert.ok(Array.isArray(rooms));
+      assert.ok(
+        !rooms.some(
+          (r) =>
+            typeof r === "object" &&
+            r !== null &&
+            "name" in r &&
+            r.name === "should-not-exist",
+        ),
+        "the disguised request must not have created the room",
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("still accepts a same-origin JSON POST after the Content-Type check", async () => {
+    const { port, cleanup } = await setup();
+    try {
+      const { status } = await postAction(port, {
+        action: "create_room",
+        name: "content-type-ok-room",
+        type: "public",
+      });
+      assert.strictEqual(status, 200);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("rejects a cross-origin WebSocket connection to the dashboard chat WS", async () => {
+    const { port, cleanup } = await setup();
+    try {
+      const result = await openWs(port, "/", "https://evil.example");
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.code, 403);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("still accepts a same-origin (or originless) dashboard WebSocket connection", async () => {
+    const { port, cleanup } = await setup();
+    try {
+      const result = await openWs(port, "/");
+      assert.strictEqual(result.ok, true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("intentionally still accepts /ws/mesh from another origin (standalone-PWA case)", async () => {
+    const { port, cleanup } = await setup();
+    try {
+      const result = await openWs(port, "/ws/mesh", "https://evil.example");
+      assert.strictEqual(
+        result.ok,
+        true,
+        "documents that /ws/mesh is open-by-design; only real auth closes this",
+      );
     } finally {
       await cleanup();
     }
