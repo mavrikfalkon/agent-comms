@@ -63,6 +63,7 @@ PokeChatGPT() {
 }
 
 PokeGrokTui() {
+    global PokeText
     hwnd := WinExist("Grok ahk_exe WindowsTerminal.exe")
     if !hwnd {
         TrayTip "CommsRelay poke", "Grok TUI not found (title Grok, WindowsTerminal).", 2
