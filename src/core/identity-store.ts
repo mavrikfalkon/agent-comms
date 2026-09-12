@@ -1,7 +1,7 @@
 /**
  * Persistent bridge identity: load-or-create the TLS key material for a (harness, cwd) slot so the certificate fingerprint — and therefore the peer and agent ID — survives restarts.
  *
- * Mesh state stays in memory and on the wire; the only thing on disk is this local credential, the same trust model as an SSH key. A lock file holding a PID keeps two live bridges in one slot from sharing an identity, which would put duplicate peer IDs on the mesh; the second bridge runs with an ephemeral identity (the behaviour before persistence) instead. Bridges without a graceful shutdown hook can skip releasing the lock: a stale lock is detected by probing the recorded PID, the same way the coordinator probes for stale agents.
+ * Mesh state stays in memory and on the wire; the only thing on disk is this local credential, the same trust model as an SSH key. A lock file holding a PID and a last-refresh timestamp keeps two live bridges in one slot from sharing an identity, which would put duplicate peer IDs on the mesh; the second bridge runs with an ephemeral identity (the behaviour before persistence) instead. Bridges without a graceful shutdown hook can skip releasing the lock: a stale lock self-heals once its timestamp goes quiet (the holder stops heartbeating) or its recorded PID is confirmed dead — checking the PID alone is not enough, since the OS can recycle that PID number onto an unrelated live process before the successor starts.
  *
  * Persisting the key material rather than a bare agent ID is what makes restarts work: delivery routing fires when agentId === peerId, and peerId is the live certificate fingerprint, so an ID without its key can never match the running peer.
  */
@@ -26,6 +26,18 @@ export interface IdentitySlot {
 
 /** Renew during the final twelfth of the certificate's validity. */
 const RENEWAL_MARGIN_MS = CERTIFICATE_VALIDITY_MS / 12;
+
+/** How often a live lock holder refreshes its lock's timestamp. */
+const LOCK_HEARTBEAT_MS = 10_000;
+
+/**
+ * A lock not refreshed within this window is treated as abandoned, even if
+ * its recorded PID happens to belong to a live process. PIDs get recycled by
+ * the OS (fast on Windows), so a bare "is this PID alive" check can find an
+ * unrelated process that just happens to have inherited the dead holder's
+ * PID number and falsely conclude the slot is still held.
+ */
+const LOCK_STALE_MS = LOCK_HEARTBEAT_MS * 3;
 
 interface StoredIdentity {
   privateKey: string;
@@ -76,20 +88,62 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Read the PID holding the lock, or undefined when absent or unreadable. */
-function readLockPid(lockFile: string): number | undefined {
+interface LockState {
+  pid: number;
+  /** Epoch ms the lock was last written or heartbeat-refreshed. */
+  updatedAt: number;
+}
+
+/** Read the lock's holder PID and last-refresh time, or undefined when absent or unreadable. */
+function readLock(lockFile: string): LockState | undefined {
   let raw: string;
   try {
     raw = fs.readFileSync(lockFile, "utf-8");
   } catch {
     return undefined;
   }
-  const pid = Number.parseInt(raw.trim(), 10);
-  return Number.isInteger(pid) ? pid : undefined;
+  const [pidLine, updatedAtLine] = raw.split("\n");
+  const pid = Number.parseInt((pidLine ?? "").trim(), 10);
+  if (!Number.isInteger(pid)) return undefined;
+  const updatedAt = Date.parse((updatedAtLine ?? "").trim());
+  return { pid, updatedAt: Number.isNaN(updatedAt) ? 0 : updatedAt };
+}
+
+/** Read the PID holding the lock, or undefined when absent or unreadable. */
+function readLockPid(lockFile: string): number | undefined {
+  return readLock(lockFile)?.pid;
 }
 
 function writeLock(lockFile: string): void {
-  fs.writeFileSync(lockFile, `${String(process.pid)}\n`, "utf-8");
+  fs.writeFileSync(
+    lockFile,
+    `${String(process.pid)}\n${new Date().toISOString()}\n`,
+    "utf-8",
+  );
+}
+
+/** Per-lock-file heartbeat timers, so a held slot keeps proving it's alive. */
+const heartbeats = new Map<string, ReturnType<typeof setInterval>>();
+
+function startHeartbeat(lockFile: string): void {
+  stopHeartbeat(lockFile);
+  const timer = setInterval(() => {
+    // Only refresh while we still own the lock: a slot taken over by a
+    // successor after we crashed should not have its new lock clobbered.
+    if (readLockPid(lockFile) === process.pid) {
+      writeLock(lockFile);
+    }
+  }, LOCK_HEARTBEAT_MS);
+  timer.unref();
+  heartbeats.set(lockFile, timer);
+}
+
+function stopHeartbeat(lockFile: string): void {
+  const timer = heartbeats.get(lockFile);
+  if (timer !== undefined) {
+    clearInterval(timer);
+    heartbeats.delete(lockFile);
+  }
 }
 
 function persistIdentity(identityFile: string, identity: PeerIdentity): void {
@@ -111,17 +165,21 @@ export function loadOrCreateIdentity(slot: IdentitySlot): PeerIdentity {
   const { dir, identityFile, lockFile } = slotPaths(slot);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  const heldBy = readLockPid(lockFile);
-  if (heldBy !== undefined && heldBy !== process.pid && isPidAlive(heldBy)) {
-    console.error(
-      `agent-comms: identity slot ${slot.harness} (${slot.cwd}) is held by live pid ${String(heldBy)}; running with an ephemeral identity`,
-    );
-    return generateIdentity();
+  const held = readLock(lockFile);
+  if (held !== undefined && held.pid !== process.pid) {
+    const stale = Date.now() - held.updatedAt > LOCK_STALE_MS;
+    if (!stale && isPidAlive(held.pid)) {
+      console.error(
+        `agent-comms: identity slot ${slot.harness} (${slot.cwd}) is held by live pid ${String(held.pid)}; running with an ephemeral identity`,
+      );
+      return generateIdentity();
+    }
   }
 
   const identity =
     loadStoredIdentity(identityFile) ?? createIdentity(identityFile);
   writeLock(lockFile);
+  startHeartbeat(lockFile);
   return identity;
 }
 
@@ -165,6 +223,7 @@ function createIdentity(identityFile: string): PeerIdentity {
  */
 export function releaseIdentityLock(slot: IdentitySlot): void {
   const { lockFile } = slotPaths(slot);
+  stopHeartbeat(lockFile);
   if (readLockPid(lockFile) === process.pid) {
     fs.rmSync(lockFile, { force: true });
   }

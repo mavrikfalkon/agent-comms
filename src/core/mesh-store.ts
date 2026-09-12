@@ -1559,9 +1559,16 @@ export class MeshStore implements CommsStore {
       }
     }
     for (const id of purgeIds) {
+      // identityCache is keyed by "harness--cwd", not by agent id — look up
+      // the agent's slot key before dropping its record, or the cache entry
+      // is never actually cleared and a later re-registration for that same
+      // slot recovers a dangling id that no longer exists in this.agents.
+      const agent = this.agents.get(id);
+      if (agent) {
+        this.identityCache.delete(`${agent.harness}--${agent.cwd}`);
+      }
       this.agents.delete(id);
       this.peerInfo.delete(id);
-      this.identityCache.delete(id);
       this.deliveryQueues.delete(id);
     }
   }

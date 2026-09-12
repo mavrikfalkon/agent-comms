@@ -82,7 +82,10 @@ void test("a slot held by a live process yields an ephemeral identity", () => {
   const lockFile = slotFile(dir, ".lock");
 
   const holder = spawnLiveProcess();
-  fs.writeFileSync(lockFile, `${String(holder.pid)}\n`);
+  fs.writeFileSync(
+    lockFile,
+    `${String(holder.pid)}\n${new Date().toISOString()}\n`,
+  );
 
   const loser = loadOrCreateIdentity(slot);
   assert.notEqual(loser.fingerprint, owner.fingerprint);
@@ -99,11 +102,34 @@ void test("a stale lock from a dead process is taken over", async () => {
   const lockFile = slotFile(dir, ".lock");
 
   const holder = spawnLiveProcess();
-  fs.writeFileSync(lockFile, `${String(holder.pid)}\n`);
+  fs.writeFileSync(
+    lockFile,
+    `${String(holder.pid)}\n${new Date().toISOString()}\n`,
+  );
   await holder.exit();
 
   const successor = loadOrCreateIdentity(slot);
   assert.equal(successor.fingerprint, owner.fingerprint);
+  releaseIdentityLock(slot);
+});
+
+void test("a lock with a live but recycled pid is reclaimed once its heartbeat goes stale", () => {
+  const { slot, dir } = tempSlot("grok-tui");
+  const owner = loadOrCreateIdentity(slot);
+  const lockFile = slotFile(dir, ".lock");
+
+  // Simulate PID reuse: the recorded pid belongs to a genuinely live
+  // process (so a bare process.kill(pid, 0) check would say "still held"),
+  // but nothing has refreshed this lock's timestamp in a long time because
+  // the real holder died and an unrelated process later inherited its pid.
+  const holder = spawnLiveProcess();
+  const staleTimestamp = new Date(Date.now() - 60_000).toISOString();
+  fs.writeFileSync(lockFile, `${String(holder.pid)}\n${staleTimestamp}\n`);
+
+  const successor = loadOrCreateIdentity(slot);
+  assert.equal(successor.fingerprint, owner.fingerprint);
+
+  void holder.exit();
   releaseIdentityLock(slot);
 });
 
