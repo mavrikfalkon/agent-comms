@@ -10,13 +10,14 @@ $pending = Join-Path $dir "claude-code--$slug.jsonl"
 if (-not (Test-Path -LiteralPath $pending)) {
     exit 0
 }
-$draining = "$pending.draining-$PID-$(Get-Date -UFormat %s)"
+$stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$draining = "$pending.draining-$PID-$stamp"
 try {
     Move-Item -LiteralPath $pending -Destination $draining -Force
 } catch {
     exit 0
 }
-$content = Get-Content -LiteralPath $draining -Raw -ErrorAction SilentlyContinue
+$content = Get-Content -LiteralPath $draining -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $draining -Force -ErrorAction SilentlyContinue
 if ([string]::IsNullOrWhiteSpace($content)) {
     exit 0
@@ -25,7 +26,8 @@ if ([string]::IsNullOrWhiteSpace($content)) {
 foreach ($line in ($content -split "`n")) {
     $t = $line.Trim()
     if ($t.Length -gt 0) {
-        [Console]::Error.WriteLine("  📬 $t")
+        [Console]::Error.WriteLine("  > $t")
     }
 }
 exit 2
+
