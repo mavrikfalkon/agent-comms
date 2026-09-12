@@ -14,33 +14,67 @@ SetTitleMatchMode 2
 ;   ^#!2  ChatGPT/Codex (ChatGPT.exe, title ChatGPT)
 ;   ^#!3  Grok TUI      (WindowsTerminal.exe, title Grok)
 ;   ^#!4  Grok Bot
-;   ^#!0  Claude + ChatGPT + Grok TUI
-; From Main: PokeComms("chatgpt", "your text")  ; who: claude|chatgpt|codex|grok-tui|grok-bot|all
+;   ^#!0  all except butch
+; From Main: PokeComms("chatgpt", "your text")  ; who + message, from=butch
+; Agents / this TUI (does not touch running Main):
+;   AutoHotkey64.exe commsrelay-poke.ahk from who "message"
+;   from = grok-tui|claude-coworker|codex|butch
+;   who  = claude|chatgpt|codex|grok-tui|grok-bot|all
+;   all  = every target except from (never doorbell self)
 ; Reload Main: Ctrl+Alt+R
 
 PokeText := "Poke: call agent_comms with action read_room room=CommsRelay, report new messages, then stop. Do not implement."
 
-PokeComms(who, text := "") {
+; One-shot CLI when this file is the launched script (not when included by Main).
+if (A_ScriptFullPath = A_LineFile && A_Args.Length >= 2) {
+    from := A_Args[1]
+    who := A_Args[2]
+    msg := ""
+    n := 3
+    while n <= A_Args.Length {
+        msg .= (msg = "" ? "" : " ") A_Args[n]
+        n++
+    }
+    Poke(from, who, msg)
+    ExitApp
+}
+
+; from + who + message. Skips the window that belongs to from.
+Poke(from, who, message := "") {
     global PokeText
     saved := PokeText
-    if text != ""
-        PokeText := text
+    body := message != "" ? message : saved
+    PokeText := from != "" ? "[" from "] " body : body
+    skip := PokeSkipTarget(from)
     try {
         switch StrLower(who) {
-            case "claude", "claude-coworker":
-                PokeClaude()
+            case "claude", "claude-coworker", "claude-code":
+                if skip != "claude"
+                    PokeClaude()
             case "chatgpt", "codex":
-                PokeChatGPT()
+                if skip != "chatgpt"
+                    PokeChatGPT()
             case "grok", "grok-tui", "tui":
-                PokeGrokTui()
+                if skip != "grok-tui"
+                    PokeGrokTui()
             case "grok-bot", "bot":
-                PokeGrokBot()
+                if skip != "grok-bot"
+                    PokeGrokBot()
             case "all":
-                PokeClaude()
-                Sleep 400
-                PokeChatGPT()
-                Sleep 400
-                PokeGrokTui()
+                if skip != "claude" {
+                    PokeClaude()
+                    Sleep 400
+                }
+                if skip != "chatgpt" {
+                    PokeChatGPT()
+                    Sleep 400
+                }
+                if skip != "grok-tui" {
+                    PokeGrokTui()
+                    Sleep 400
+                }
+                if skip != "grok-bot"
+                    PokeGrokBot()
             default:
                 TrayTip "CommsRelay poke", "Unknown recipient: " who, 2
         }
@@ -49,11 +83,31 @@ PokeComms(who, text := "") {
     }
 }
 
-^#!1:: PokeComms("claude")
-^#!2:: PokeComms("chatgpt")
-^#!3:: PokeComms("grok-tui")
-^#!4:: PokeComms("grok-bot")
-^#!0:: PokeComms("all")
+PokeSkipTarget(from) {
+    switch StrLower(from) {
+        case "claude", "claude-coworker", "claude-code":
+            return "claude"
+        case "chatgpt", "codex":
+            return "chatgpt"
+        case "grok-tui", "grok", "tui":
+            return "grok-tui"
+        case "grok-bot", "bot":
+            return "grok-bot"
+        default:
+            return ""
+    }
+}
+
+; Main F19/F20: who + message, from = butch (does not skip any agent window).
+PokeComms(who, text := "") {
+    Poke("butch", who, text)
+}
+
+^#!1:: Poke("butch", "claude")
+^#!2:: Poke("butch", "chatgpt")
+^#!3:: Poke("butch", "grok-tui")
+^#!4:: Poke("butch", "grok-bot")
+^#!0:: Poke("butch", "all")
 
 PokeClaude() {
     PokeElectron("Claude", "claude.exe")
