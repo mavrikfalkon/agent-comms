@@ -233,16 +233,13 @@ function handleRequest(
 ): void {
   const url = new URL(req.url ?? "/", `http://localhost`);
 
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
+  // No CORS headers: this API is same-origin only. The one legitimate
+  // cross-origin case (a PWA hosted elsewhere, e.g. GitHub Pages) never
+  // calls this REST API — it only probes with a no-cors fetch and talks
+  // over /ws/mesh — so a wildcard Access-Control-Allow-Origin here just
+  // let any website the user had open silently act as them. Full
+  // authentication (needed for real remote/phone access) is separate,
+  // planned follow-up work.
 
   // Frontend HTML
   if (url.pathname === "/" && req.method === "GET") {

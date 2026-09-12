@@ -212,4 +212,28 @@ describe("Web server integration", () => {
       await cleanup();
     }
   });
+
+  it("does not send permissive CORS headers", async () => {
+    const { port, cleanup } = await setup();
+    try {
+      const headers = await new Promise<http.IncomingHttpHeaders>(
+        (resolve, reject) => {
+          const req = http.request(
+            { hostname: "127.0.0.1", port, path: "/api/agents", method: "GET" },
+            (res) => {
+              res.resume();
+              res.on("end", () => resolve(res.headers));
+            },
+          );
+          req.on("error", reject);
+          req.end();
+        },
+      );
+      assert.strictEqual(headers["access-control-allow-origin"], undefined);
+      assert.strictEqual(headers["access-control-allow-methods"], undefined);
+      assert.strictEqual(headers["access-control-allow-headers"], undefined);
+    } finally {
+      await cleanup();
+    }
+  });
 });
