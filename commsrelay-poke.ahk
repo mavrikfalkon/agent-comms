@@ -213,7 +213,10 @@ ClickBottomComposer(hwnd, clientW, clientH) {
 }
 
 ActivateHwnd(hwnd, label) {
-    WinRestore "ahk_id " hwnd
+    ; Only restore if actually minimized. WinRestore on a normal/max window
+    ; resizes Grok TUI (Windows Terminal) every doorbell.
+    if WinGetMinMax("ahk_id " hwnd) = -1
+        WinRestore "ahk_id " hwnd
     WinActivate "ahk_id " hwnd
     if !WinWaitActive("ahk_id " hwnd, , 2) {
         TrayTip "CommsRelay poke", label " did not activate.", 2
