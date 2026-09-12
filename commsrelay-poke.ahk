@@ -243,19 +243,10 @@ ReleaseChord() {
 
 PasteReplaceElectron() {
     global PokeText
-    old := ClipboardAll()
-    try {
-        A_Clipboard := PokeText
-        if !ClipWait(0.8) {
-            TrayTip "CommsRelay poke", "Clipboard did not accept poke text.", 2
-            return
-        }
-        Send "^a"
-        Sleep 40
-        Send "^v"
-        Sleep 60
-        Send "{Enter}"
-    } finally {
-        A_Clipboard := old
-    }
+    ; Do not use the clipboard. A leftover bitmap (screenshot) wins over text on Ctrl+V.
+    Send "^a"
+    Sleep 40
+    SendText PokeText
+    Sleep 40
+    Send "{Enter}"
 }
