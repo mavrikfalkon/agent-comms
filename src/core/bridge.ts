@@ -79,6 +79,13 @@ export const MCP_TOOL_PARAMS = z.object({
   reason: z.string().optional(),
   method: z.string().optional(),
   host: z.string().optional(),
+  fingerprint: z
+    .string()
+    .trim()
+    .optional()
+    .describe(
+      "Expected remote TLS certificate fingerprint for mesh_connect, obtained from the remote operator.",
+    ),
   port: z.number().optional(),
   policy: z.string().optional(),
   adapter: z.string().optional(),
@@ -235,10 +242,13 @@ export function buildAction(params: Record<string, unknown>): CommsAction {
         throw new BuildActionError("mesh_connect", "host");
       if (p.port === undefined)
         throw new BuildActionError("mesh_connect", "port");
+      if (!p.fingerprint)
+        throw new BuildActionError("mesh_connect", "fingerprint");
       return {
         action: "mesh_connect",
         host: p.host,
         port: p.port,
+        fingerprint: p.fingerprint,
         ...(p.policy !== undefined && { policy: p.policy }),
       };
     }

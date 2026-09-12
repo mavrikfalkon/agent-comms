@@ -327,6 +327,7 @@ export const CommsActionSchema = defineSchema(
       action: z.literal("mesh_connect"),
       host: z.string(),
       port: z.number(),
+      fingerprint: z.string().trim().min(1),
       policy: z.string().optional(),
     }),
     z.object({

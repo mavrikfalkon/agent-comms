@@ -341,11 +341,21 @@ export class TlsTransport {
     peerId: string,
     localDataPort: number,
     name: string,
-    fingerprint: string,
+    _fingerprint: string,
+    expectedFingerprint?: string,
   ): Promise<void> {
+    if (!expectedFingerprint?.trim()) {
+      throw new Error("An expected remote certificate fingerprint is required");
+    }
     this._peerId = peerId;
     await new Promise<void>((resolve, reject) => {
       const socket = tls.connect({ ...this.connectOptions, host, port }, () => {
+        // Pin the server before sending any mesh handshake or connection request.
+        if (!this.verifyClaimedPeerId(socket, expectedFingerprint)) {
+          clearTimeout(timer);
+          reject(new Error("Remote certificate fingerprint mismatch"));
+          return;
+        }
         this.coordinatorSocket = socket;
 
         clearTimeout(timer);
@@ -384,7 +394,7 @@ export class TlsTransport {
           peerId,
           dataPort: localDataPort,
           name,
-          fingerprint,
+          fingerprint: this.identity.fingerprint,
         };
         socket.write(encode(req));
         socket.on("error", () => {
@@ -844,6 +854,8 @@ export class TlsTransport {
               dataPort: item.dataPort,
             });
           } else if (item.method === "connect_request") {
+            if (!this.verifyClaimedPeerId(socket, item.peerId)) return;
+            if (!this.verifyClaimedPeerId(socket, item.fingerprint)) return;
             const handle: ConnectionHandle = { id: item.peerId, policy };
             this.pendingConnections.set(handle.id, {
               socket,

@@ -12,6 +12,9 @@ import { generateIdentity } from "../core/identity.js";
 import { encode } from "../core/wire-protocol.js";
 import type { PeerInfo } from "../core/wire-protocol.js";
 import type { TransportEvents } from "../core/transport.js";
+import { buildAction } from "../core/bridge.js";
+import { MeshStore } from "../core/mesh-store.js";
+import { CommsTool } from "../core/tool.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -198,6 +201,216 @@ async function testConnectToPeerCertMismatchRejected(): Promise<void> {
   );
 }
 
+async function testSpoofedConnectRequestRejected(): Promise<void> {
+  for (const claim of ["peerId", "fingerprint"]) {
+    const coordinator = generateIdentity();
+    const attacker = generateIdentity();
+    let requested = false;
+    let sawError = false;
+    const transport = new TlsTransport(
+      noopEvents({
+        onConnectionRequest: () => {
+          requested = true;
+        },
+        onError: () => {
+          sawError = true;
+        },
+      }),
+      coordinator,
+    );
+    await transport.becomeCoordinator("127.0.0.1", 0);
+    const port = transport.listListeners()[0]?.port;
+    assert.ok(port);
+    const socket = tls.connect({
+      key: attacker.privateKey,
+      cert: attacker.certificate,
+      host: "127.0.0.1",
+      port,
+      rejectUnauthorized: false,
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("error", reject);
+        socket.once("secureConnect", () => {
+          socket.write(
+            encode({
+              method: "connect_request",
+              peerId:
+                claim === "peerId"
+                  ? coordinator.fingerprint
+                  : attacker.fingerprint,
+              fingerprint:
+                claim === "fingerprint"
+                  ? coordinator.fingerprint
+                  : attacker.fingerprint,
+              dataPort: 12345,
+              name: "spoofed request",
+            }),
+          );
+          resolve();
+        });
+      });
+      await sleep(200);
+      assert.equal(
+        requested,
+        false,
+        `spoofed ${claim} must not reach approval`,
+      );
+      assert.ok(sawError, "rejection must be reported");
+      assert.ok(socket.destroyed, "spoofing socket must be destroyed");
+    } finally {
+      socket.destroy();
+      await transport.shutdown();
+    }
+  }
+}
+
+async function testRemoteFingerprintPin(): Promise<void> {
+  const remoteIdentity = generateIdentity();
+  const localIdentity = generateIdentity();
+  let requests = 0;
+  const remote = new TlsTransport(
+    noopEvents({
+      onConnectionRequest: (handle, request) => {
+        requests++;
+        assert.equal(request.fingerprint, localIdentity.fingerprint);
+        void remote.acceptConnection(handle);
+      },
+    }),
+    remoteIdentity,
+  );
+  await remote.becomeCoordinator("127.0.0.1", 0);
+  const port = remote.listListeners()[0]?.port;
+  assert.ok(port);
+  try {
+    for (const pin of [
+      undefined,
+      "",
+      localIdentity.fingerprint,
+      remoteIdentity.fingerprint,
+    ]) {
+      const local = new TlsTransport(noopEvents(), localIdentity);
+      try {
+        const attempt = local.connectToRemote(
+          "127.0.0.1",
+          port,
+          localIdentity.fingerprint,
+          12345,
+          "pin-test",
+          localIdentity.fingerprint,
+          pin,
+        );
+        if (pin === remoteIdentity.fingerprint) {
+          await attempt;
+          assert.equal(
+            requests,
+            1,
+            "the correctly pinned request reaches approval",
+          );
+          assert.ok(local.hasCoordinatorConnection);
+        } else {
+          await assert.rejects(attempt, /fingerprint|certificate/i);
+          assert.equal(
+            requests,
+            0,
+            "no request is sent to an unverified server",
+          );
+          assert.equal(local.hasCoordinatorConnection, false);
+        }
+      } finally {
+        await local.shutdown();
+      }
+    }
+  } finally {
+    await remote.shutdown();
+  }
+}
+
+async function testMeshConnectFingerprintParsing(): Promise<void> {
+  for (const fingerprint of [undefined, "", "   "]) {
+    assert.throws(
+      () =>
+        buildAction({
+          action: "mesh_connect",
+          host: "127.0.0.1",
+          port: 12345,
+          fingerprint,
+        }),
+      /fingerprint/,
+    );
+  }
+  const fingerprint = generateIdentity().fingerprint;
+  assert.deepEqual(
+    buildAction({
+      action: "mesh_connect",
+      host: "127.0.0.1",
+      port: 12345,
+      fingerprint,
+    }),
+    { action: "mesh_connect", host: "127.0.0.1", port: 12345, fingerprint },
+  );
+}
+
+async function testPinnedMeshConnectTool(): Promise<void> {
+  const remoteIdentity = generateIdentity();
+  const localIdentity = generateIdentity();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let received: (() => void) | undefined;
+  let failed: ((error: unknown) => void) | undefined;
+  let requestedFingerprint: string | undefined;
+  const request = new Promise<void>((resolve, reject) => {
+    received = resolve;
+    failed = reject;
+    timer = setTimeout(
+      () => reject(new Error("Pinned tool request did not reach approval")),
+      2000,
+    );
+  });
+  const remote = new TlsTransport(
+    noopEvents({
+      onConnectionRequest: (handle, info) => {
+        requestedFingerprint = info.fingerprint;
+        void remote.acceptConnection(handle).then(
+          () => received?.(),
+          (error: unknown) => failed?.(error),
+        );
+      },
+    }),
+    remoteIdentity,
+  );
+  const store = new MeshStore(0);
+  store.peerId = localIdentity.fingerprint;
+  store.setTransport(new TlsTransport(store.events, localIdentity));
+  try {
+    await remote.becomeCoordinator("127.0.0.1", 0);
+    await store.startDataServerOnly();
+    const port = remote.listListeners()[0]?.port;
+    assert.ok(port);
+    const tool = new CommsTool(store);
+    const result = await tool.handle(
+      {
+        agentId: store.peerId,
+        harness: "test",
+        cwd: "/test",
+        pid: process.pid,
+      },
+      buildAction({
+        action: "mesh_connect",
+        host: "127.0.0.1",
+        port,
+        fingerprint: remoteIdentity.fingerprint,
+      }),
+    );
+    assert.equal(result.isError, false, result.content);
+    await request;
+    assert.equal(requestedFingerprint, localIdentity.fingerprint);
+  } finally {
+    clearTimeout(timer);
+    await store.shutdown();
+    await remote.shutdown();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
@@ -205,6 +418,10 @@ async function testConnectToPeerCertMismatchRejected(): Promise<void> {
 const testName = process.argv[2];
 
 const tests: Record<string, () => Promise<void>> = {
+  "spoofed-connect-request-rejected": testSpoofedConnectRequestRejected,
+  "remote-fingerprint-pin": testRemoteFingerprintPin,
+  "mesh-connect-fingerprint-parsing": testMeshConnectFingerprintParsing,
+  "pinned-mesh-connect-tool": testPinnedMeshConnectTool,
   "spoofed-introduce-rejected": testSpoofedIntroduceRejected,
   "spoofed-pong-rejected": testSpoofedPongRejected,
   "connect-to-peer-cert-mismatch-rejected":

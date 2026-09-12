@@ -359,6 +359,7 @@ describe("connection approval", () => {
     // Use buildAction to construct the mesh_connect action
     const connectAction = buildAction({
       action: "mesh_connect",
+      fingerprint: storeA.peerId,
       host: "127.0.0.1",
       port: portA,
     });

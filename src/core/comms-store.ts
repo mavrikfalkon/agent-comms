@@ -127,7 +127,11 @@ export interface CommsStore {
     name: string;
     fingerprint: string;
   }[];
-  connectToRemote(host: string, port: number): Promise<void>;
+  connectToRemote(
+    host: string,
+    port: number,
+    fingerprint?: string,
+  ): Promise<void>;
 
   /** Start only the data server without connecting to a coordinator. */
   startDataServerOnly(): Promise<void>;

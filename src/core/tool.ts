@@ -557,9 +557,13 @@ export class CommsTool {
     action: CommsAction & { action: "mesh_connect" },
   ): Promise<CommsResult> {
     try {
-      await this.store.connectToRemote(action.host, action.port);
+      await this.store.connectToRemote(
+        action.host,
+        action.port,
+        action.fingerprint,
+      );
       return {
-        content: `Connection request sent to ${action.host}:${String(action.port)}.`,
+        content: `Connection attempt started to ${action.host}:${String(action.port)}; remote verification and approval are pending.`,
         isError: false,
       };
     } catch (err) {

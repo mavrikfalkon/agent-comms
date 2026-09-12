@@ -191,6 +191,8 @@ export interface MeshTransport {
     dataPort: number,
     name: string,
     fingerprint: string,
+    /** Expected remote certificate fingerprint; required by TLS transports. */
+    expectedFingerprint?: string,
   ): Promise<void>;
 
   /**
