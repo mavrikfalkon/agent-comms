@@ -70,20 +70,31 @@ export class ChatController extends EventEmitter {
    * Used by bridges that already have a store and agent registration
    * (e.g. pi, Claude Code) so the web UI shares the same mesh peer
    * instead of creating a redundant one.
+   *
+   * Deliberately does not call `new ChatController(...)`: that constructor
+   * calls loadOrCreateIdentity for harness "user", claiming a real identity
+   * lock at this cwd that would then never be released for the life of the
+   * process (nothing here owns it to release). Building the instance
+   * directly skips that entirely — this controller reuses the caller's
+   * identity, it doesn't need one of its own.
    */
   static fromExisting(store: MeshStore, ctx: CommsContext): ChatController {
-    const ctrl = new ChatController("");
-    // Replace the store with the existing one
-    ctrl.store = store;
-    ctrl.tool = new CommsTool(store, store.discovery);
-    ctrl.ctx = ctx;
+    const created: unknown = Object.create(ChatController.prototype);
+    if (!(created instanceof ChatController)) {
+      throw new Error("Object.create(ChatController.prototype) type mismatch");
+    }
+    EventEmitter.call(created);
+    created.store = store;
+    created.tool = new CommsTool(store, store.discovery);
+    created.ctx = ctx;
+    created.ownedIdentitySlot = undefined;
 
     // Push delivery events to UIs
     store.onDelivery = (_agentId: string, event: DeliveryEvent) => {
-      ctrl.emit("message", event);
+      created.emit("message", event);
     };
 
-    return ctrl;
+    return created;
   }
 
   async init(): Promise<void> {
