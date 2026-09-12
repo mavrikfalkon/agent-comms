@@ -1,10 +1,13 @@
 #Requires AutoHotkey v2.0
 SetTitleMatchMode 2
+#Include "C:\Users\mavri\Projects\GrokOnPC\AHKScripts\upstream\UIA-v2\Lib\UIA.ahk"
 
 ; Lives in this project. Included from GrokOnPC\AHKScripts\Main.ahk — do not #SingleInstance
 ; or ExitApp here (that would kill Main). Do not copy into C:\Users\mavri\AHK\.
 ; Leader poke — drain agent_comms. No screen-absolute clicks. Match process + title.
-; Electron: click lower-center of THAT window's client.
+; Electron: click the BOTTOM-MOST Edit/Document in that window (the composer).
+; Do not match by accessible name — Claude Code already renamed Prompt / placeholder.
+; Sidebars shift the field off window-center; the control's own rect is the target.
 ; Terminal (Grok TUI): activate + SendText only — never Ctrl+A.
 ;
 ;   ^#!1  Claude Code  (claude.exe, title Claude)
@@ -53,7 +56,6 @@ PokeComms(who, text := "") {
 ^#!0:: PokeComms("all")
 
 PokeClaude() {
-    ; Claude Code: Electron, prompt is Edit "Prompt" near the bottom of the client.
     PokeElectron("Claude", "claude.exe")
 }
 
@@ -104,11 +106,59 @@ PokeElectronHwnd(hwnd, label) {
         return
     }
     ReleaseChord()
-    CoordMode "Mouse", "Client"
-    ; Prompt sits at the bottom of Claude Code / ChatGPT. Stay inside THIS window.
-    Click w // 2, h - 56
+    if !ClickBottomComposer(hwnd, w, h) {
+        ; Right sidebar (your Claude layout) puts the field left of window-center.
+        CoordMode "Mouse", "Client"
+        Click w // 3, h - 56
+    }
     Sleep 80
     PasteReplaceElectron()
+}
+
+; Bottom-most Edit or Document with a composer-sized height. Not by Name.
+ClickBottomComposer(hwnd, clientW, clientH) {
+    try {
+        win := UIA.ElementFromHandle(hwnd)
+    } catch {
+        return false
+    }
+    best := 0
+    bestBottom := -1
+    for typeName in ["Edit", "Document"] {
+        try
+            list := win.FindAll({ Type: typeName })
+        catch
+            continue
+        for el in list {
+            try {
+                if el.IsOffscreen
+                    continue
+                loc := el.Location
+                if loc.w < 80 || loc.h < 18 || loc.h > 280
+                    continue
+                bottom := loc.y + loc.h
+                if bottom > bestBottom {
+                    bestBottom := bottom
+                    best := el
+                }
+            }
+        }
+    }
+    if !best
+        return false
+    try {
+        best.Click()
+        return true
+    } catch {
+        try {
+            loc := best.Location
+            CoordMode "Mouse", "Screen"
+            Click loc.x + loc.w // 2, loc.y + loc.h // 2
+            return true
+        } catch {
+            return false
+        }
+    }
 }
 
 ActivateHwnd(hwnd, label) {
