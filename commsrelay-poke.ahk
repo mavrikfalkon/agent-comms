@@ -13,14 +13,14 @@ SetTitleMatchMode 2
 ;   ^#!1  Claude Code  (claude.exe, title Claude)
 ;   ^#!2  ChatGPT/Codex (ChatGPT.exe, title ChatGPT)
 ;   ^#!3  Grok TUI      (WindowsTerminal.exe, title Grok)
-;   ^#!4  Grok Bot
-;   ^#!0  all except butch
+;   ^#!4  Grok Bot (not on CommsRelay yet — named who only, not in all)
+;   ^#!0  all mesh: claude + chatgpt + grok-tui (except from). Not grok-bot.
 ; From Main: PokeComms("chatgpt", "your text")  ; who + message, from=butch
 ; Agents / this TUI (does not touch running Main):
 ;   AutoHotkey64.exe commsrelay-poke.ahk from who "message"
 ;   from = grok-tui|claude-coworker|codex|butch
 ;   who  = claude|chatgpt|codex|grok-tui|grok-bot|all
-;   all  = every target except from (never doorbell self)
+;   all  = claude + chatgpt + grok-tui except from. grok-bot is not in the room.
 ; Reload Main: Ctrl+Alt+R
 
 PokeText := "Poke: call agent_comms with action read_room room=CommsRelay, report new messages, then stop. Do not implement."
@@ -69,12 +69,9 @@ Poke(from, who, message := "") {
                     PokeChatGPT()
                     Sleep 400
                 }
-                if skip != "grok-tui" {
+                if skip != "grok-tui"
                     PokeGrokTui()
-                    Sleep 400
-                }
-                if skip != "grok-bot"
-                    PokeGrokBot()
+                ; grok-bot is not on CommsRelay; use who=grok-bot when it is.
             default:
                 TrayTip "CommsRelay poke", "Unknown recipient: " who, 2
         }
