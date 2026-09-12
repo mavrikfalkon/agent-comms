@@ -125,7 +125,11 @@ PokeGrokTui() {
     if !ActivateHwnd(hwnd, "Grok TUI")
         return
     ReleaseChord()
-    ; No click. No Ctrl+A.
+    if WinGetID("A") != hwnd {
+        TrayTip "CommsRelay poke", "Grok TUI not focused; not sending (would hit the wrong window).", 2
+        return
+    }
+    ; No click. No Ctrl+A. Send only if this hwnd is active.
     SendText PokeText
     Send "{Enter}"
 }
@@ -157,6 +161,10 @@ PokeElectronHwnd(hwnd, label) {
         return
     }
     ReleaseChord()
+    if WinGetID("A") != hwnd {
+        TrayTip "CommsRelay poke", label " not focused; not sending.", 2
+        return
+    }
     if !ClickBottomComposer(hwnd, w, h) {
         ; Right sidebar (your Claude layout) puts the field left of window-center.
         CoordMode "Mouse", "Client"
