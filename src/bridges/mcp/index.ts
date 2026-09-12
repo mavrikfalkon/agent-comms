@@ -22,6 +22,7 @@ import {
 import { TlsTransport } from "../../core/tls-transport.js";
 import {
   loadOrCreateIdentity,
+  releaseIdentityLock,
   type IdentitySlot,
 } from "../../core/identity-store.js";
 import { tryStartWebServer } from "../user/web/server.js";
@@ -188,16 +189,47 @@ async function runBridge(trace: McpTrace): Promise<void> {
     }),
   );
 
+  // -----------------------------------------------------------------------
+  // Shutdown — clean up mesh state so a closed bridge doesn't linger as a
+  // stale "active" peer (stdin EOF alone doesn't exit the process, since
+  // the web server and mesh connections keep the event loop alive).
+  // -----------------------------------------------------------------------
+
+  async function shutdown(): Promise<void> {
+    try {
+      if (agentId !== undefined) {
+        await store.setAgentOffline(agentId);
+      }
+      await store.shutdown();
+    } catch {
+      // best-effort — the process is exiting anyway
+    } finally {
+      releaseIdentityLock(identitySlot);
+    }
+  }
+
   const previousClose = mcp.server.onclose;
   const previousError = mcp.server.onerror;
   mcp.server.onclose = () => {
     trace("mcp_closed");
     previousClose?.();
+    void shutdown().finally(() => process.exit(0));
   };
   mcp.server.onerror = (error) => {
     trace("mcp_error", errorFields(error));
     previousError?.(error);
   };
+
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
+  }
+
+  process.on("exit", () => {
+    releaseIdentityLock(identitySlot);
+  });
+
   await mcp.connect(new StdioServerTransport());
   trace("mcp_connected");
 }

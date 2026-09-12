@@ -19,6 +19,7 @@ import {
   type IdentitySlot,
 } from "../../core/identity-store.js";
 import { tryStartWebServer } from "../user/web/server.js";
+import { ChatController } from "../user/controller.js";
 import { nanoid } from "../../core/nanoid.js";
 
 // Persistent identity for this slot: a stable fingerprint means the agent
@@ -65,8 +66,10 @@ export const AgentCommsPlugin = async (opts: {
   const client = opts.client;
 
   await store.init();
-  await tryStartWebServer();
 
+  // Register before starting the web UI so it can share this agent's mesh
+  // identity via ChatController.fromExisting — otherwise createWebServer
+  // falls back to minting its own "Dashboard" peer.
   const reg = await ensureRegistered({
     cwd: process.cwd(),
     store,
@@ -74,6 +77,15 @@ export const AgentCommsPlugin = async (opts: {
     defaultName: `opencode-${nanoid(4)}`,
   });
   const agentId = reg.agentId;
+
+  await tryStartWebServer(
+    ChatController.fromExisting(store, {
+      agentId,
+      harness: "opencode",
+      cwd: process.cwd(),
+      pid: process.pid,
+    }),
+  );
 
   // Incoming messages arrive via TCP mesh — push to TUI immediately
   store.onDelivery = async (_targetId: string, event) => {

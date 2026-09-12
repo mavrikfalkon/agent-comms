@@ -22,9 +22,11 @@ import {
 import { TlsTransport } from "../../core/tls-transport.js";
 import {
   loadOrCreateIdentity,
+  releaseIdentityLock,
   type IdentitySlot,
 } from "../../core/identity-store.js";
 import { tryStartWebServer } from "../user/web/server.js";
+import { ChatController } from "../user/controller.js";
 import { nanoid } from "../../core/nanoid.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -108,9 +110,10 @@ export async function run(): Promise<void> {
   // -----------------------------------------------------------------------
 
   await store.init();
-  await tryStartWebServer();
-  await mcp.connect(new StdioServerTransport());
 
+  // Register before starting the web UI so it can share this agent's mesh
+  // identity via ChatController.fromExisting — otherwise createWebServer
+  // falls back to minting its own "Dashboard" peer.
   const reg = await ensureRegistered({
     cwd: process.cwd(),
     store,
@@ -118,4 +121,50 @@ export async function run(): Promise<void> {
     defaultName: `codex-${nanoid(4)}`,
   });
   agentId = reg.agentId;
+
+  await tryStartWebServer(
+    ChatController.fromExisting(store, {
+      agentId,
+      harness: "codex",
+      cwd: process.cwd(),
+      pid: process.pid,
+    }),
+  );
+
+  // -----------------------------------------------------------------------
+  // Shutdown — clean up mesh state so a closed bridge doesn't linger as a
+  // stale "active" peer (stdin EOF alone doesn't exit the process, since
+  // the web server and mesh connections keep the event loop alive).
+  // -----------------------------------------------------------------------
+
+  async function shutdown(): Promise<void> {
+    try {
+      if (agentId !== undefined) {
+        await store.setAgentOffline(agentId);
+      }
+      await store.shutdown();
+    } catch {
+      // best-effort — the process is exiting anyway
+    } finally {
+      releaseIdentityLock(identitySlot);
+    }
+  }
+
+  const previousClose = mcp.server.onclose;
+  mcp.server.onclose = () => {
+    previousClose?.();
+    void shutdown().finally(() => process.exit(0));
+  };
+
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
+  }
+
+  process.on("exit", () => {
+    releaseIdentityLock(identitySlot);
+  });
+
+  await mcp.connect(new StdioServerTransport());
 }
