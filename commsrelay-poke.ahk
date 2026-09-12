@@ -12,21 +12,45 @@ SetTitleMatchMode 2
 ;   ^#!3  Grok TUI      (WindowsTerminal.exe, title Grok)
 ;   ^#!4  Grok Bot
 ;   ^#!0  Claude + ChatGPT + Grok TUI
+; From Main: PokeComms("chatgpt", "your text")  ; who: claude|chatgpt|codex|grok-tui|grok-bot|all
 ; Reload Main: Ctrl+Alt+R
 
 PokeText := "Poke: call agent_comms with action read_room room=CommsRelay, report new messages, then stop. Do not implement."
 
-^#!1:: PokeClaude()
-^#!2:: PokeChatGPT()
-^#!3:: PokeGrokTui()
-^#!4:: PokeGrokBot()
-^#!0:: {
-    PokeClaude()
-    Sleep 400
-    PokeChatGPT()
-    Sleep 400
-    PokeGrokTui()
+PokeComms(who, text := "") {
+    global PokeText
+    saved := PokeText
+    if text != ""
+        PokeText := text
+    try {
+        switch StrLower(who) {
+            case "claude", "claude-coworker":
+                PokeClaude()
+            case "chatgpt", "codex":
+                PokeChatGPT()
+            case "grok", "grok-tui", "tui":
+                PokeGrokTui()
+            case "grok-bot", "bot":
+                PokeGrokBot()
+            case "all":
+                PokeClaude()
+                Sleep 400
+                PokeChatGPT()
+                Sleep 400
+                PokeGrokTui()
+            default:
+                TrayTip "CommsRelay poke", "Unknown recipient: " who, 2
+        }
+    } finally {
+        PokeText := saved
+    }
 }
+
+^#!1:: PokeComms("claude")
+^#!2:: PokeComms("chatgpt")
+^#!3:: PokeComms("grok-tui")
+^#!4:: PokeComms("grok-bot")
+^#!0:: PokeComms("all")
 
 PokeClaude() {
     ; Claude Code: Electron, prompt is Edit "Prompt" near the bottom of the client.
