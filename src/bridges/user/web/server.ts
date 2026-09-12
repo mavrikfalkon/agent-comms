@@ -729,6 +729,15 @@ function parsePushSubscription(value: unknown): PushSubscription | undefined {
 // ---------------------------------------------------------------------------
 
 /**
+ * Loopback hostnames a browser can legitimately use to reach this server:
+ * runWeb()'s own standalone-CLI banner advertises "localhost", while
+ * WEB_HOST and tryStartWebServer's banner use "127.0.0.1" — both resolve to
+ * the same listener. An explicit allowlist, not a bare Host-header trust —
+ * this must not accept whatever hostname a request happens to claim.
+ */
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost"]);
+
+/**
  * True unless the request carries a browser-set Origin header that doesn't
  * match this server's own address. No Origin header at all (non-browser
  * clients, or same-process tooling) is allowed through.
@@ -742,7 +751,17 @@ function isSameOriginUpgrade(
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : undefined;
   if (port === undefined) return false;
-  return origin === `http://${WEB_HOST}:${String(port)}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  return (
+    parsed.protocol === "http:" &&
+    LOOPBACK_HOSTNAMES.has(parsed.hostname) &&
+    Number(parsed.port) === port
+  );
 }
 
 function json(res: http.ServerResponse, data: unknown): void {

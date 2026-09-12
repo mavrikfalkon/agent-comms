@@ -306,6 +306,22 @@ describe("Web server integration", () => {
     }
   });
 
+  it("accepts a dashboard WebSocket whose Origin is localhost, not just 127.0.0.1", async () => {
+    // runWeb()'s own standalone-CLI banner advertises http://localhost:<port>
+    // — rejecting that origin would lock out the CLI's own advertised URL.
+    const { port, cleanup } = await setup();
+    try {
+      const result = await openWs(
+        port,
+        "/",
+        `http://localhost:${String(port)}`,
+      );
+      assert.strictEqual(result.ok, true);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("intentionally still accepts /ws/mesh from another origin (standalone-PWA case)", async () => {
     const { port, cleanup } = await setup();
     try {
