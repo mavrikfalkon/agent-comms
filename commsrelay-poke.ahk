@@ -1,25 +1,21 @@
 #Requires AutoHotkey v2.0
-#SingleInstance Force
-#UseHook
 SetTitleMatchMode 2
 
-; Lives in this project folder. Do not put CommsRelay AHK under C:\Users\mavri\AHK\.
-; Leader poke — drain agent_comms. Never uses screen-absolute clicks (those locked the PC).
-; Match process + title, not hwnd. Electron: click lower-center of THAT window's client.
-; Terminal (Grok TUI): activate + SendText only — never Ctrl+A (readline beginning-of-line).
+; Lives in this project. Included from GrokOnPC\AHKScripts\Main.ahk — do not #SingleInstance
+; or ExitApp here (that would kill Main). Do not copy into C:\Users\mavri\AHK\.
+; Leader poke — drain agent_comms. No screen-absolute clicks. Match process + title.
+; Electron: click lower-center of THAT window's client.
+; Terminal (Grok TUI): activate + SendText only — never Ctrl+A.
 ;
 ;   ^#!1  Claude Code  (claude.exe, title Claude)
 ;   ^#!2  ChatGPT/Codex (ChatGPT.exe, title ChatGPT)
 ;   ^#!3  Grok TUI      (WindowsTerminal.exe, title Grok)
 ;   ^#!4  Grok Bot
 ;   ^#!0  Claude + ChatGPT + Grok TUI
-;   ^#!Esc  unload this script
-;
-; Stop: tray Exit, or Ctrl+Win+Alt+Esc. Reload after editing this file.
+; Reload Main: Ctrl+Alt+R
 
 PokeText := "Poke: call agent_comms with action read_room room=CommsRelay, report new messages, then stop. Do not implement."
 
-^#!Esc:: ExitApp
 ^#!1:: PokeClaude()
 ^#!2:: PokeChatGPT()
 ^#!3:: PokeGrokTui()
