@@ -1,5 +1,7 @@
 /**
- * Persistent bridge identity: load-or-create the TLS key material for a (harness, cwd) slot so the certificate fingerprint — and therefore the peer and agent ID — survives restarts.
+ * Persistent bridge identity: load-or-create the TLS key material for a (harness, cwd, instance) slot so the certificate fingerprint — and therefore the peer and agent ID — survives restarts.
+ *
+ * `instance` (from the AGENT_COMMS_INSTANCE env var, or the slot's explicit `instance` field for tests) exists because `harness` alone is too coarse: every generic-MCP client — Claude Code, grok-tui, anything else configured to run `bridge mcp` — shares the literal harness string "mcp", and Start-AgentCommsMcp.cmd always launches from this same project directory. Without a discriminator, those genuinely distinct concurrent clients collide on one (harness, cwd) slot; only whichever gets there first holds the real persisted identity; every other one is forced onto a disposable identity every single time it connects. Leaving `instance` empty reproduces the original one-slot-per-(harness,cwd) behaviour exactly, filenames included, so identities already on disk are untouched until a launcher opts in by setting the env var.
  *
  * Mesh state stays in memory and on the wire; the only thing on disk is this local credential, the same trust model as an SSH key. A lock file holding a PID and a last-refresh timestamp keeps two live bridges in one slot from sharing an identity, which would put duplicate peer IDs on the mesh; the second bridge runs with an ephemeral identity (the behaviour before persistence) instead. Bridges without a graceful shutdown hook can skip releasing the lock: a stale lock self-heals once its timestamp goes quiet (the holder stops heartbeating) or its recorded PID is confirmed dead — checking the PID alone is not enough, since the OS can recycle that PID number onto an unrelated live process before the successor starts.
  *
@@ -16,10 +18,19 @@ import {
 } from "./identity.js";
 import type { PeerIdentity } from "./identity.js";
 
-/** A bridge's identity slot: one persisted identity per harness and cwd. */
+/** A bridge's identity slot: one persisted identity per (harness, cwd, instance). */
 export interface IdentitySlot {
   harness: string;
   cwd: string;
+  /**
+   * Distinguishes concurrent clients that would otherwise share (harness, cwd)
+   * — e.g. Claude Code and grok-tui both running the generic "mcp" harness
+   * from this same project directory. Defaults to the AGENT_COMMS_INSTANCE
+   * environment variable when unset; explicit here mainly so tests don't need
+   * to mutate process.env. Empty/unset keeps the original single-slot
+   * behaviour, on-disk file names included.
+   */
+  instance?: string;
   /** Directory override for tests. */
   dir?: string;
 }
@@ -61,8 +72,13 @@ function isStoredIdentity(value: unknown): value is StoredIdentity {
 }
 
 /** Replace path separators and other filesystem-hostile characters. */
-function slugifyCwd(cwd: string): string {
-  return cwd.replace(/[\\/:*?"<>|]/g, "_");
+function slugify(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, "_");
+}
+
+/** Explicit slot value, else AGENT_COMMS_INSTANCE, else none (original behaviour). */
+function resolveInstance(slot: IdentitySlot): string {
+  return slot.instance ?? process.env.AGENT_COMMS_INSTANCE ?? "";
 }
 
 function slotPaths(slot: IdentitySlot): {
@@ -71,7 +87,10 @@ function slotPaths(slot: IdentitySlot): {
   lockFile: string;
 } {
   const dir = slot.dir ?? path.join(os.homedir(), ".agent-comms");
-  const base = `identity-${slot.harness}--${slugifyCwd(slot.cwd)}`;
+  const instance = resolveInstance(slot);
+  const base =
+    `identity-${slot.harness}--${slugify(slot.cwd)}` +
+    (instance ? `--${slugify(instance)}` : "");
   return {
     dir,
     identityFile: path.join(dir, `${base}.json`),
@@ -165,12 +184,16 @@ export function loadOrCreateIdentity(slot: IdentitySlot): PeerIdentity {
   const { dir, identityFile, lockFile } = slotPaths(slot);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
+  const instance = resolveInstance(slot);
   const held = readLock(lockFile);
   if (held !== undefined && held.pid !== process.pid) {
     const stale = Date.now() - held.updatedAt > LOCK_STALE_MS;
     if (!stale && isPidAlive(held.pid)) {
+      const slotDesc = instance
+        ? `${slot.harness} (${slot.cwd}, instance=${instance})`
+        : `${slot.harness} (${slot.cwd})`;
       console.error(
-        `agent-comms: identity slot ${slot.harness} (${slot.cwd}) is held by live pid ${String(held.pid)}; running with an ephemeral identity`,
+        `agent-comms: identity slot ${slotDesc} is held by live pid ${String(held.pid)}; running with an ephemeral identity`,
       );
       return generateIdentity();
     }

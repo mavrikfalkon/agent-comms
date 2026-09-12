@@ -133,6 +133,84 @@ void test("a lock with a live but recycled pid is reclaimed once its heartbeat g
   releaseIdentityLock(slot);
 });
 
+void test("different AGENT_COMMS_INSTANCE values get independent identities within the same (harness, cwd)", () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "agent-comms-identity-test-"));
+  const slotA: IdentitySlot = {
+    harness: "mcp",
+    cwd: "/tmp/project",
+    dir,
+    instance: "claude-coworker",
+  };
+  const slotB: IdentitySlot = {
+    harness: "mcp",
+    cwd: "/tmp/project",
+    dir,
+    instance: "grok-tui",
+  };
+
+  const identityA = loadOrCreateIdentity(slotA);
+  const identityB = loadOrCreateIdentity(slotB);
+  assert.notEqual(identityA.fingerprint, identityB.fingerprint);
+
+  // Each instance holds its own lock in the shared directory, not one slot
+  // fought over — that's the whole point of the discriminator.
+  const lockFiles = fs.readdirSync(dir).filter((f) => f.endsWith(".lock"));
+  assert.equal(lockFiles.length, 2);
+
+  // Reloading with the same instance recovers its own identity, not the other's.
+  const reloadedA = loadOrCreateIdentity(slotA);
+  assert.equal(reloadedA.fingerprint, identityA.fingerprint);
+
+  releaseIdentityLock(slotA);
+  releaseIdentityLock(slotB);
+  assert.equal(
+    fs.readdirSync(dir).filter((f) => f.endsWith(".lock")).length,
+    0,
+  );
+});
+
+void test("an unset instance does not collide with a named instance in the same slot", () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "agent-comms-identity-test-"));
+  const bare: IdentitySlot = { harness: "mcp", cwd: "/tmp/project", dir };
+  const named: IdentitySlot = {
+    harness: "mcp",
+    cwd: "/tmp/project",
+    dir,
+    instance: "codex",
+  };
+
+  const bareIdentity = loadOrCreateIdentity(bare);
+  const namedIdentity = loadOrCreateIdentity(named);
+  assert.notEqual(bareIdentity.fingerprint, namedIdentity.fingerprint);
+
+  releaseIdentityLock(bare);
+  releaseIdentityLock(named);
+});
+
+void test("a second process with the same instance is still forced ephemeral", () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "agent-comms-identity-test-"));
+  const slot: IdentitySlot = {
+    harness: "mcp",
+    cwd: "/tmp/project",
+    dir,
+    instance: "codex",
+  };
+  const owner = loadOrCreateIdentity(slot);
+  const lockFile = slotFile(dir, ".lock");
+
+  const holder = spawnLiveProcess();
+  fs.writeFileSync(
+    lockFile,
+    `${String(holder.pid)}\n${new Date().toISOString()}\n`,
+  );
+
+  const loser = loadOrCreateIdentity(slot);
+  assert.notEqual(loser.fingerprint, owner.fingerprint);
+
+  void holder.exit();
+  releaseIdentityLock(slot);
+});
+
 void test("a near-expiry identity is renewed", () => {
   const { slot, dir } = tempSlot("opencode");
   const original = loadOrCreateIdentity(slot);
