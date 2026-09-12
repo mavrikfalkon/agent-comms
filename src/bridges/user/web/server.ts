@@ -170,7 +170,9 @@ export async function createWebServer(
   server.listen(port, WEB_HOST, () => {
     const addr = server.address();
     const actualPort = typeof addr === "object" && addr ? addr.port : port;
-    console.log(`Agent Comms web UI: http://${WEB_HOST}:${String(actualPort)}`);
+    console.error(
+      `Agent Comms web UI: http://${WEB_HOST}:${String(actualPort)}`,
+    );
   });
 
   return { server, controller, wss, pushManager };
@@ -198,7 +200,7 @@ export async function runWeb(userName: string, port = 0): Promise<void> {
   handle.server.on("listening", () => {
     const addr = handle.server.address();
     const actualPort = typeof addr === "object" && addr ? addr.port : port;
-    console.log(`Agent Comms web UI: http://localhost:${String(actualPort)}`);
+    console.error(`Agent Comms web UI: http://localhost:${String(actualPort)}`);
     console.log(
       `Connected as ${userName} (user) [${handle.controller.agentId}]`,
     );
